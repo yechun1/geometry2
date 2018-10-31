@@ -31,12 +31,11 @@
   <depend>actionlib</depend>
   <depend>actionlib_msgs</depend>
   <depend>xmlrpcpp</depend> -->
-  <!-- <build_depend version_gte="1.11.1">message_filters</build_depend> -->
+  <depend>message_filters</depend>
   <!-- <build_depend>rosgraph</build_depend> -->
   <!-- <build_depend>rospy</build_depend> -->
   <!-- <build_depend>tf2_py</build_depend> -->
-  <!-- <run_depend>message_filters</run_depend>
-  <run_depend>rospy</run_depend>
+  <!--run_depend>rospy</run_depend>
   <run_depend>tf2_py</run_depend>-->
 
   <!-- <test_depend>rostest</test_depend> -->

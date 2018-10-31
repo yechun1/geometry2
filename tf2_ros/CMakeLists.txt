@@ -15,6 +15,7 @@ find_package(ament_cmake REQUIRED)
 # find_package(actionlib REQUIRED)
 # find_package(actionlib_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(message_filters REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_msgs REQUIRED)
@@ -23,6 +24,7 @@ find_package(rmw)
 
 include_directories(include
   ${geometry_msgs_INCLUDE_DIRS}
+  ${message_filters_INCLUDE_DIRS}
   ${rclcpp_INCLUDE_DIRS}
   ${rmw_INCLUDE_DIRS}
   ${rmw_implementation_INCLUDE_DIRS}
@@ -42,6 +44,7 @@ add_library(${PROJECT_NAME} SHARED
 
 target_link_libraries(${PROJECT_NAME}
   ${geometry_msgs_LIBRARIES}
+  ${message_filters_LIBRARIES}
   ${rclcpp_LIBRARIES}
   ${rmw_LIBRARIES}
   ${rmw_implementation_LIBRARIES}
@@ -129,6 +132,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_buffer test/test_buffer.cpp)
   target_link_libraries(test_buffer ${PROJECT_NAME})
+
+  ament_add_gtest(${PROJECT_NAME}_test_message_filter test/message_filter_test.cpp)
+  target_link_libraries(${PROJECT_NAME}_test_message_filter ${PROJECT_NAME})
 
 # TODO(tfoote) port tests to use ROS2 instead of ROS1 api.
 if (false)

@@ -37,23 +37,24 @@
 #include <string>
 #include <list>
 #include <vector>
-#include <boost/function.hpp>
-#include <boost/bind.hpp>
+//#include <boost/function.hpp>
+//#include <boost/bind.hpp>
 #include <memory>
-#include <boost/thread.hpp>
+//#include <boost/thread.hpp>
+#include <boost/signals2.hpp>
 
 #include <message_filters/connection.h>
 #include <message_filters/simple_filter.h>
+#include <message_filters/message_traits.h>
 
-#include <ros/node_handle.h>
-#include <ros/callback_queue_interface.h>
-#include <ros/init.h>
+#include <rclcpp/rclcpp.hpp>
+
 
 #define TF2_ROS_MESSAGEFILTER_DEBUG(fmt, ...) \
-  ROS_DEBUG_NAMED("message_filter", std::string(std::string("MessageFilter [target=%s]: ") + std::string(fmt)).c_str(), getTargetFramesString().c_str(), __VA_ARGS__)
+  RCUTILS_LOG_DEBUG_NAMED("message_filter", std::string(std::string("MessageFilter [target=%s]: ") + std::string(fmt)).c_str(), getTargetFramesString().c_str(), __VA_ARGS__)
 
 #define TF2_ROS_MESSAGEFILTER_WARN(fmt, ...) \
-  ROS_WARN_NAMED("message_filter", std::string(std::string("MessageFilter [target=%s]: ") + std::string(fmt)).c_str(), getTargetFramesString().c_str(), __VA_ARGS__)
+  RCUTILS_LOG_WARN_NAMED("message_filter", std::string(std::string("MessageFilter [target=%s]: ") + std::string(fmt)).c_str(), getTargetFramesString().c_str(), __VA_ARGS__)
 
 namespace tf2_ros
 {
@@ -70,12 +71,12 @@ enum FilterFailureReason
   EmptyFrameID,
 };
 }
-typedef filter_failure_reasons::FilterFailureReason FilterFailureReason;
+using FilterFailureReason = filter_failure_reasons::FilterFailureReason;
 
 class MessageFilterBase
 {
 public:
-  typedef std::vector<std::string> V_string;
+  using V_string = std::vector<std::string>;
 
   virtual ~MessageFilterBase(){}
   virtual void clear() = 0;
@@ -105,9 +106,9 @@ class MessageFilter : public MessageFilterBase, public message_filters::SimpleFi
 {
 public:
   using MConstPtr = std::shared_ptr<M const>;
-  typedef ros::MessageEvent<M const> MEvent;
-  typedef boost::function<void(const MConstPtr&, FilterFailureReason)> FailureCallback;
-  typedef boost::signals2::signal<void(const MConstPtr&, FilterFailureReason)> FailureSignal;
+  using MEvent = message_filters::MessageEvent<M const>;
+  using FailureCallback = std::function<void(const MConstPtr&, FilterFailureReason)>;
+  using FailureSignal = boost::signals2::signal<void(const MConstPtr&, FilterFailureReason)>;
 
   // If you hit this assert your message does not have a header, or does not have the HasHeader trait defined for it
   // Actually, we need to check that the message has a header, or that it
@@ -121,12 +122,57 @@ public:
    * \param bc The tf2::BufferCore this filter should use
    * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
    * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
-   * \param nh The NodeHandle whose callback queue we should add callbacks to
+   * \param node The Node whose callback queue we should add callbacks to
    */
-  MessageFilter(tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, const ros::NodeHandle& nh)
+
+// TODO: ROS 2 has no CallbackQueueInterface API, removed it templately
+//  MessageFilter(tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, const ros::NodeHandle& nh)
+//  : bc_(bc)
+//  , queue_size_(queue_size)
+//  , callback_queue_(nh.getCallbackQueue())
+//  {
+//    init();
+//
+//    setTargetFrame(target_frame);
+//  }
+
+  /**
+   * \brief Constructor
+   *
+   * \param f The filter to connect this filter's input to.  Often will be a message_filters::Subscriber.
+   * \param bc The tf2::BufferCore this filter should use
+   * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
+   * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
+   * \param node The Node whose callback queue we should add callbacks to
+   */
+// TODO: ROS 2 has no CallbackQueueInterface API, removed it templately
+//
+//  template<class F>
+//  MessageFilter(F& f, tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, const ros::NodeHandle& nh)
+//  : bc_(bc)
+//  , queue_size_(queue_size)
+//  , callback_queue_(nh.getCallbackQueue())
+//  {
+//    init();
+//
+//    setTargetFrame(target_frame);
+//
+//    connectInput(f);
+//  }
+
+  /**
+   * \brief Constructor
+   *
+   * \param bc The tf2::BufferCore this filter should use
+   * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
+   * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
+   * \param cbqueue The callback queue to add callbacks to.  If NULL, callbacks will happen from whatever thread either
+   *    a) add() is called, which will generally be when the previous filter in the chain outputs a message, or
+   *    b) tf2::BufferCore::setTransform() is called
+   */
+  MessageFilter(tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size)
   : bc_(bc)
   , queue_size_(queue_size)
-  , callback_queue_(nh.getCallbackQueue())
   {
     init();
 
@@ -140,57 +186,14 @@ public:
    * \param bc The tf2::BufferCore this filter should use
    * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
    * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
-   * \param nh The NodeHandle whose callback queue we should add callbacks to
-   */
-  template<class F>
-  MessageFilter(F& f, tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, const ros::NodeHandle& nh)
-  : bc_(bc)
-  , queue_size_(queue_size)
-  , callback_queue_(nh.getCallbackQueue())
-  {
-    init();
-
-    setTargetFrame(target_frame);
-
-    connectInput(f);
-  }
-
-  /**
-   * \brief Constructor
-   *
-   * \param bc The tf2::BufferCore this filter should use
-   * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
-   * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
-   * \param cbqueue The callback queue to add callbacks to.  If NULL, callbacks will happen from whatever thread either
-   *    a) add() is called, which will generally be when the previous filter in the chain outputs a message, or
-   *    b) tf2::BufferCore::setTransform() is called
-   */
-  MessageFilter(tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, ros::CallbackQueueInterface* cbqueue)
-  : bc_(bc)
-  , queue_size_(queue_size)
-  , callback_queue_(cbqueue)
-  {
-    init();
-
-    setTargetFrame(target_frame);
-  }
-
-  /**
-   * \brief Constructor
-   *
-   * \param f The filter to connect this filter's input to.  Often will be a message_filters::Subscriber.
-   * \param bc The tf2::BufferCore this filter should use
-   * \param target_frame The frame this filter should attempt to transform to.  To use multiple frames, pass an empty string here and use the setTargetFrames() function.
-   * \param queue_size The number of messages to queue up before throwing away old ones.  0 means infinite (dangerous).
    * \param cbqueue The callback queue to add callbacks to.  If NULL, callbacks will happen from whatever thread either
    *    a) add() is called, which will generally be when the previous filter in the chain outputs a message, or
    *    b) tf2::BufferCore::setTransform() is called
    */
   template<class F>
-  MessageFilter(F& f, tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size, ros::CallbackQueueInterface* cbqueue)
+  MessageFilter(F& f, tf2::BufferCore& bc, const std::string& target_frame, uint32_t queue_size)
   : bc_(bc)
   , queue_size_(queue_size)
-  , callback_queue_(cbqueue)
   {
     init();
 
@@ -244,7 +247,7 @@ public:
 
     target_frames_.resize(target_frames.size());
     std::transform(target_frames.begin(), target_frames.end(), target_frames_.begin(), this->stripSlash);
-    expected_success_count_ = target_frames_.size() + (time_tolerance_.isZero() ? 0 : 1);
+    expected_success_count_ = target_frames_.size() + (time_tolerance_.count() == 0 ? 0 : 1);
 
     std::stringstream ss;
     for (V_string::iterator it = target_frames_.begin(); it != target_frames_.end(); ++it)
@@ -269,7 +272,7 @@ public:
   {
     std::unique_lock<std::mutex> lock(target_frames_mutex_);
     time_tolerance_ = tolerance;
-    expected_success_count_ = target_frames_.size() + (time_tolerance_.isZero() ? 0 : 1);
+    expected_success_count_ = target_frames_.size() + (time_tolerance_.count() == 0 ? 0 : 1);
   }
 
   /**
@@ -277,12 +280,13 @@ public:
    */
   void clear()
   {
-    boost::unique_lock< boost::shared_mutex > unique_lock(messages_mutex_);
+    std::unique_lock< std::mutex > unique_lock(messages_mutex_);
 
     TF2_ROS_MESSAGEFILTER_DEBUG("%s", "Cleared");
 
     bc_.removeTransformableCallback(callback_handle_);
-    callback_handle_ = bc_.addTransformableCallback(boost::bind(&MessageFilter::transformable, this, _1, _2, _3, _4, _5));
+    callback_handle_ = bc_.addTransformableCallback(std::bind(&MessageFilter::transformable, this,
+      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
 
     messages_.clear();
     message_count_ = 0;
@@ -297,10 +301,11 @@ public:
       return;
     }
 
-    namespace mt = ros::message_traits;
+    namespace mt = message_filters::message_traits;
     const MConstPtr& message = evt.getMessage();
     std::string frame_id = stripSlash(mt::FrameId<M>::value(*message));
-    builtin_interfaces::msg::Time stamp = mt::TimeStamp<M>::value(*message);
+    builtin_interfaces::msg::Time time_msg = mt::TimeStamp<M>::value(*message);
+    tf2::TimePoint stamp = tf2_ros::fromMsg(time_msg);
 
     if (frame_id.empty())
     {
@@ -339,7 +344,7 @@ public:
           info.handles.push_back(handle);
         }
 
-        if (!time_tolerance_.isZero())
+        if (time_tolerance_.count() != 0)
         {
           handle = bc_.addTransformableRequest(callback_handle_, target_frame, frame_id, stamp + time_tolerance_);
           if (handle == 0xffffffffffffffffULL) // never transformable
@@ -371,12 +376,13 @@ public:
       if (queue_size_ != 0 && message_count_ + 1 > queue_size_)
       {
         // While we're using the reference keep a shared lock on the messages.
-        boost::shared_lock< boost::shared_mutex > shared_lock(messages_mutex_);
+        // TODO: c++11 not support std::shared_lock, use unique_lock as workaround
+        std::unique_lock< std::mutex > shared_lock(messages_mutex_);
 
         ++dropped_message_count_;
         const MessageInfo& front = messages_.front();
         TF2_ROS_MESSAGEFILTER_DEBUG("Removed oldest message because buffer is full, count now %d (frame_id=%s, stamp=%f)", message_count_,
-                                (mt::FrameId<M>::value(*front.event.getMessage())).c_str(), mt::TimeStamp<M>::value(*front.event.getMessage()).toSec());
+                                (mt::FrameId<M>::value(*front.event.getMessage())).c_str(), mt::TimeStamp<M>::value(*front.event.getMessage()).nanoseconds());
 
         V_TransformableRequestHandle::const_iterator it = front.handles.begin();
         V_TransformableRequestHandle::const_iterator end = front.handles.end();
@@ -391,7 +397,7 @@ public:
         // They both require the transformable_requests_mutex_ in BufferCore.
         shared_lock.unlock();
         // There is a very slight race condition if an older message arrives in this gap.
-        boost::unique_lock< boost::shared_mutex > unique_lock(messages_mutex_);
+        std::unique_lock< std::mutex > unique_lock(messages_mutex_);
         messages_.pop_front();
          --message_count_;
       }
@@ -399,12 +405,12 @@ public:
       // Add the message to our list
       info.event = evt;
       // Lock access to the messages_ before modifying them.
-      boost::unique_lock< boost::shared_mutex > unique_lock(messages_mutex_);
+      std::unique_lock< std::mutex > unique_lock(messages_mutex_);
       messages_.push_back(info);
       ++message_count_;
     }
 
-    TF2_ROS_MESSAGEFILTER_DEBUG("Added message in frame %s at time %.3f, count now %d", frame_id.c_str(), stamp.toSec(), message_count_);
+    TF2_ROS_MESSAGEFILTER_DEBUG("Added message in frame %s at time %.3f, count now %d", frame_id.c_str(), tf2::timeToSec(stamp), message_count_);
 
     ++incoming_message_count_;
   }
@@ -416,10 +422,13 @@ public:
    */
   void add(const MConstPtr& message)
   {
-    boost::shared_ptr<std::map<std::string, std::string> > header(new std::map<std::string, std::string>);
+    std::shared_ptr<std::map<std::string, std::string> > header(new std::map<std::string, std::string>);
     (*header)["callerid"] = "unknown";
-    ros::WallTime n = ros::WallTime::now();
-    builtin_interfaces::msg::Time t(n.sec, n.nsec);
+    // TODO: no replacement of ros::WallTime::now on ROS2, use tf2::get_now instead.
+    // ros::WallTime n = ros::WallTime::now();
+    // builtin_interfaces::msg::Time t(n.sec, n.nsec);
+    tf2::TimePoint n = tf2::get_now();
+    builtin_interfaces::msg::Time t = tf2_ros::toMsg(n);
     add(MEvent(message, header, t));
   }
 
@@ -430,7 +439,9 @@ public:
   message_filters::Connection registerFailureCallback(const FailureCallback& callback)
   {
     std::unique_lock<std::mutex> lock(failure_signal_mutex_);
-    return message_filters::Connection(boost::bind(&MessageFilter::disconnectFailure, this, _1), failure_signal_.connect(callback));
+    // TODO: as message_filter removed boost::signals2::connection, defined failure_connection_ to handle
+    failure_connection_(failure_signal_(callback));
+    return message_filters::Connection(std::bind(&MessageFilter::disconnectFailure, this, _1));
   }
 
   virtual void setQueueSize( uint32_t new_queue_size )
@@ -458,15 +469,17 @@ private:
     warned_about_empty_frame_id_ = false;
     expected_success_count_ = 1;
 
-    callback_handle_ = bc_.addTransformableCallback(boost::bind(&MessageFilter::transformable, this, _1, _2, _3, _4, _5));
+    callback_handle_ = bc_.addTransformableCallback(std::bind(&MessageFilter::transformable, this,
+              std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
   }
 
   void transformable(tf2::TransformableRequestHandle request_handle, const std::string& target_frame, const std::string& source_frame,
-                     builtin_interfaces::msg::Time time, tf2::TransformableResult result)
+                     tf2::TimePoint time, tf2::TransformableResult result)
   {
-    namespace mt = ros::message_traits;
-
-    boost::upgrade_lock< boost::shared_mutex > lock(messages_mutex_);
+    namespace mt = message_filters::message_traits;
+    // TODO: c++11 has no std::upgrade_lock, here use std::unique_lock as workaround
+    // boost::upgrade_lock< boost::shared_mutex > lock(messages_mutex_);
+    std::unique_lock< std::mutex > lock(messages_mutex_);
 
     // find the message this request is associated with
     typename L_MessageInfo::iterator msg_it = messages_.begin();
@@ -497,7 +510,8 @@ private:
     bool can_transform = true;
     const MConstPtr& message = info.event.getMessage();
     std::string frame_id = stripSlash(mt::FrameId<M>::value(*message));
-    builtin_interfaces::msg::Time stamp = mt::TimeStamp<M>::value(*message);
+    builtin_interfaces::msg::Time time_msg = mt::TimeStamp<M>::value(*message);
+    tf2::TimePoint stamp = tf2_ros::fromMsg(time_msg);
 
     if (result == tf2::TransformAvailable)
     {
@@ -514,7 +528,7 @@ private:
           break;
         }
 
-        if (!time_tolerance_.isZero())
+        if (time_tolerance_.count() != 0)
         {
           if (!bc_.canTransform(target, frame_id, stamp + time_tolerance_))
           {
@@ -530,10 +544,13 @@ private:
     }
 
     // We will be mutating messages now, require unique lock
-    boost::upgrade_to_unique_lock< boost::shared_mutex > uniqueLock(lock);
+    // TODO: c++11 not support std::upgrade_to_unique_lock, use std::unique_lock as workaround
+    // boost::upgrade_to_unique_lock< boost::shared_mutex > uniqueLock(lock);
+    lock.unlock();
+    std::unique_lock< std::mutex > unique_lock(messages_mutex_);
     if (can_transform)
     {
-      TF2_ROS_MESSAGEFILTER_DEBUG("Message ready in frame %s at time %.3f, count now %d", frame_id.c_str(), stamp.toSec(), message_count_ - 1);
+      TF2_ROS_MESSAGEFILTER_DEBUG("Message ready in frame %s at time %.3f, count now %d", frame_id.c_str(), tf2::timeToSec(stamp), message_count_ - 1);
 
       ++successful_transform_count_;
 
@@ -544,7 +561,7 @@ private:
     {
       ++dropped_message_count_;
 
-      TF2_ROS_MESSAGEFILTER_DEBUG("Discarding message in frame %s at time %.3f, count now %d", frame_id.c_str(), stamp.toSec(), message_count_ - 1);
+      TF2_ROS_MESSAGEFILTER_DEBUG("Discarding message in frame %s at time %.3f, count now %d", frame_id.c_str(), tf2::timeToSec(stamp), message_count_ - 1);
       messageDropped(info.event, filter_failure_reasons::Unknown);
     }
 
@@ -555,19 +572,21 @@ private:
   /**
    * \brief Callback that happens when we receive a message on the message topic
    */
-  void incomingMessage(const ros::MessageEvent<M const>& evt)
+  void incomingMessage(const message_filters::MessageEvent<M const>& evt)
   {
     add(evt);
   }
 
   void checkFailures()
   {
-    if (next_failure_warning_.isZero())
+    if (tf2::timeToSec(next_failure_warning_) == 0)
     {
-      next_failure_warning_ = ros::WallTime::now() + ros::WallDuration(15);
+      // TODO: no replace of ros::WallTime::now on ROS2, use tf2::get_now instead.
+      // next_failure_warning_ = ros::WallTime::now() + ros::WallDuration(15);
+      next_failure_warning_ = tf2::get_now() + std::chrono::nanoseconds(15);
     }
 
-    if (ros::WallTime::now() >= next_failure_warning_)
+    if (tf2::get_now() >= next_failure_warning_)
     {
       if (incoming_message_count_ - message_count_ == 0)
       {
@@ -577,78 +596,83 @@ private:
       double dropped_pct = (double)dropped_message_count_ / (double)(incoming_message_count_ - message_count_);
       if (dropped_pct > 0.95)
       {
-        TF2_ROS_MESSAGEFILTER_WARN("Dropped %.2f%% of messages so far. Please turn the [%s.message_notifier] rosconsole logger to DEBUG for more information.", dropped_pct*100, ROSCONSOLE_DEFAULT_NAME);
-        next_failure_warning_ = ros::WallTime::now() + ros::WallDuration(60);
+        TF2_ROS_MESSAGEFILTER_WARN("Dropped %.2f%% of messages so far. Please turn the logger level to DEBUG for more information.", dropped_pct*100);
+        // TODO: no replace of ros::WallTime::now, use tf2::get_now instead.
+        next_failure_warning_ = tf2::get_now() + std::chrono::nanoseconds(60);
 
         if ((double)failed_out_the_back_count_ / (double)dropped_message_count_ > 0.5)
         {
-          TF2_ROS_MESSAGEFILTER_WARN("  The majority of dropped messages were due to messages growing older than the TF cache time.  The last message's timestamp was: %f, and the last frame_id was: %s", last_out_the_back_stamp_.toSec(), last_out_the_back_frame_.c_str());
+          TF2_ROS_MESSAGEFILTER_WARN("  The majority of dropped messages were due to messages growing older than the TF cache time.  The last message's timestamp was: %f, and the last frame_id was: %s", tf2::timeToSec(last_out_the_back_stamp_), last_out_the_back_frame_.c_str());
         }
       }
     }
   }
 
-  struct CBQueueCallback : public ros::CallbackInterface
-  {
-    CBQueueCallback(MessageFilter* filter, const MEvent& event, bool success, FilterFailureReason reason)
-    : event_(event)
-    , filter_(filter)
-    , reason_(reason)
-    , success_(success)
-    {}
-
-
-    virtual CallResult call()
-    {
-      if (success_)
-      {
-        filter_->signalMessage(event_);
-      }
-      else
-      {
-        filter_->signalFailure(event_, reason_);
-      }
-
-      return Success;
-    }
-
-  private:
-    MEvent event_;
-    MessageFilter* filter_;
-    FilterFailureReason reason_;
-    bool success_;
-  };
+// TODO: ROS 2 has no CallbackQueueInterface API, removed below code templately
+//  struct CBQueueCallback : public ros::CallbackInterface
+//  {
+//    CBQueueCallback(MessageFilter* filter, const MEvent& event, bool success, FilterFailureReason reason)
+//    : event_(event)
+//    , filter_(filter)
+//    , reason_(reason)
+//    , success_(success)
+//    {}
+//
+//
+//    virtual CallResult call()
+//    {
+//      if (success_)
+//      {
+//        filter_->signalMessage(event_);
+//      }
+//      else
+//      {
+//        filter_->signalFailure(event_, reason_);
+//      }
+//
+//      return Success;
+//    }
+//
+//  private:
+//    MEvent event_;
+//    MessageFilter* filter_;
+//    FilterFailureReason reason_;
+//    bool success_;
+//  };
 
   void messageDropped(const MEvent& evt, FilterFailureReason reason)
   {
-    if (callback_queue_)
-    {
-      ros::CallbackInterfacePtr cb(new CBQueueCallback(this, evt, false, reason));
-      callback_queue_->addCallback(cb, (uint64_t)this);
-    }
-    else
-    {
+// TODO: ROS 2 has no CallbackQueueInterface API, removed below code templately
+//    if (callback_queue_)
+//    {
+//      ros::CallbackInterfacePtr cb(new CBQueueCallback(this, evt, false, reason));
+//      callback_queue_->addCallback(cb, (uint64_t)this);
+//    }
+//    else
+//    {
       signalFailure(evt, reason);
-    }
+//    }
   }
 
   void messageReady(const MEvent& evt)
   {
-    if (callback_queue_)
-    {
-      ros::CallbackInterfacePtr cb(new CBQueueCallback(this, evt, true, filter_failure_reasons::Unknown));
-      callback_queue_->addCallback(cb, (uint64_t)this);
-    }
-    else
-    {
+// TODO: ROS 2 has no CallbackQueueInterface API, removed below code templately
+//    if (callback_queue_)
+//    {
+//      ros::CallbackInterfacePtr cb(new CBQueueCallback(this, evt, true, filter_failure_reasons::Unknown));
+//      callback_queue_->addCallback(cb, (uint64_t)this);
+//    }
+//    else
+//    {
       this->signalMessage(evt);
-    }
+//    }
   }
 
   void disconnectFailure(const message_filters::Connection& c)
   {
     std::unique_lock<std::mutex> lock(failure_signal_mutex_);
-    c.getBoostConnection().disconnect();
+    //c.getBoostConnection().disconnect();
+    failure_connection_.disconnect();
   }
 
   void signalFailure(const MEvent& evt, FilterFailureReason reason)
@@ -676,7 +700,7 @@ private:
   uint32_t queue_size_; ///< The maximum number of messages we queue up
   tf2::TransformableCallbackHandle callback_handle_;
 
-  typedef std::vector<tf2::TransformableRequestHandle> V_TransformableRequestHandle;
+  using V_TransformableRequestHandle = std::vector<tf2::TransformableRequestHandle>;
   struct MessageInfo
   {
     MessageInfo()
@@ -687,10 +711,10 @@ private:
     V_TransformableRequestHandle handles;
     uint32_t success_count;
   };
-  typedef std::list<MessageInfo> L_MessageInfo;
+  using L_MessageInfo = std::list<MessageInfo>;
   L_MessageInfo messages_;
   uint32_t message_count_; ///< The number of messages in the list.  Used because \<container\>.size() may have linear cost
-  boost::shared_mutex messages_mutex_; ///< The mutex used for locking message list operations
+  std::mutex messages_mutex_; ///< The mutex used for locking message list operations
   uint32_t expected_success_count_;
 
   bool warned_about_empty_frame_id_;
@@ -703,8 +727,7 @@ private:
 
   tf2::TimePoint last_out_the_back_stamp_;
   std::string last_out_the_back_frame_;
-
-  ros::WallTime next_failure_warning_;
+  tf2::TimePoint next_failure_warning_;
 
   tf2::Duration time_tolerance_; ///< Provide additional tolerance on time for messages which are stamped but can have associated duration
 
@@ -713,7 +736,8 @@ private:
   FailureSignal failure_signal_;
   std::mutex failure_signal_mutex_;
 
-  ros::CallbackQueueInterface* callback_queue_;
+  boost::signals2::connection failure_connection_;
+//  ros::CallbackQueueInterface* callback_queue_;
 };
 
 } // namespace tf2
